@@ -8,7 +8,7 @@ import re
 
 
 def read_net_file(
-    path: pathlib.Path, u_col: str = "init_node", v_col: str = "term_node", k_col: str = None
+    path: pathlib.Path, u_col: str = "init_node", v_col: str = "term_node", k_col: str = None, crs: str = None
 ) -> gpd.GeoDataFrame:
     df = pd.read_csv(path, skiprows=8, sep="\t")
     df.rename(columns={name: name.strip().lower() for name in df.columns}, inplace=True)
@@ -18,16 +18,19 @@ def read_net_file(
         k_col = "key"
         df[k_col] = 0
     df.set_index([u_col, v_col, k_col], inplace=True, verify_integrity=True)
-    return gpd.GeoDataFrame(df)
+    df["geometry"] = None
+    return gpd.GeoDataFrame(df, crs=crs)
 
 
-def read_node_file(path: pathlib.Path, index_col: str = "node") -> gpd.GeoDataFrame:
+def read_node_file(
+    path: pathlib.Path, index_col: str = "node", x_col: str = "x", y_col: str = "y", crs: str = None
+) -> gpd.GeoDataFrame:
     df = pd.read_csv(path, sep="\t")
     df.rename(columns={name: name.strip().lower() for name in df.columns}, inplace=True)
     df.drop([";"], axis=1, inplace=True)
 
     df.set_index(index_col, inplace=True, verify_integrity=True)
-    return gpd.GeoDataFrame(df)
+    return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x_col], df[y_col], crs=crs))
 
 
 def read_flow_file(
@@ -68,11 +71,13 @@ def read_demand_file(path: pathlib.Path, mode: str = "r", enc: str = "utf-8") ->
     return df.pivot(index="orig", columns="dest", values="demand")
 
 
-def convert_to_networkx(
-    node_df: gpd.GeoDataFrame, net_df: gpd.GeoDataFrame, flow_df: pd.DataFrame = None, crs: str = None
-):
+def convert_to_networkx(node_df: gpd.GeoDataFrame, net_df: gpd.GeoDataFrame, flow_df: pd.DataFrame = None):
+    # graph_from_gdfs requires x and y columns specifically
+    node_df["x"] = node_df.geometry.x
+    node_df["y"] = node_df.geometry.y
+
     if flow_df is not None:
         flow_df.index.set_names(net_df.index.names, inplace=True)
         net_df = net_df.join(flow_df)
 
-    return osmnx.convert.graph_from_gdfs(node_df, net_df, graph_attrs={"crs": crs})
+    return osmnx.convert.graph_from_gdfs(node_df, net_df)

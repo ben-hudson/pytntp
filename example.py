@@ -3,10 +3,9 @@ import pathlib
 
 root = pathlib.Path("./data/SiouxFalls")
 network = tntp.convert_to_networkx(
-    tntp.read_node_file(root / "SiouxFalls_node.tntp"),
-    tntp.read_net_file(root / "SiouxFalls_net.tntp"),
+    tntp.read_node_file(root / "SiouxFalls_node.tntp", crs="wgs84"),
+    tntp.read_net_file(root / "SiouxFalls_net.tntp", crs="wgs84"),
     tntp.read_flow_file(root / "SiouxFalls_flow.tntp", u_col="from", v_col="to"),
-    crs="wgs84",
 )
 
 node_list = list(network.nodes)
