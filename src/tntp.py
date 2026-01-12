@@ -30,7 +30,7 @@ def read_net_file(
     """
 
     df = pd.read_csv(path, skiprows=8, sep="\t")
-    df.rename(columns={name: name.strip().lower() for name in df.columns}, inplace=True)
+    df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
     df.drop(["~", ";"], axis=1, inplace=True)
 
     if k_col is None:
@@ -63,11 +63,10 @@ def read_node_file(
         GeoDataFrame indexed by ``index_col`` with a Point ``geometry`` column.
     """
 
-    df = pd.read_csv(path, sep="\t")
-    df.rename(columns={name: name.strip().lower() for name in df.columns}, inplace=True)
+    df = pd.read_csv(path, sep="\t", index_col=index_col)
+    df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
     df.drop([";"], axis=1, inplace=True)
 
-    df.set_index(index_col, inplace=True, verify_integrity=True)
     return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x_col], df[y_col], crs=crs))
 
 
@@ -92,7 +91,7 @@ def read_flow_file(
     """
 
     df = pd.read_csv(path, sep="\t")
-    df.rename(columns={name: name.strip().lower() for name in df.columns}, inplace=True)
+    df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
 
     if k_col is None:
         k_col = "key"
