@@ -8,13 +8,13 @@ pip install git+https://github.com/ben-hudson/pytntp
 
 ## Example usage
 ```
-root = pathlib.Path("./data/SiouxFalls")
+root = "https://raw.githubusercontent.com/bstabler/TransportationNetworks/refs/heads/master/SiouxFalls/"
 network = tntp.convert_to_networkx(
-    tntp.read_node_file(root / "SiouxFalls_node.tntp", index_col="Node", x_col="X", y_col="Y", crs="wgs84"),
-    tntp.read_net_file(root / "SiouxFalls_net.tntp", crs="wgs84"),
-    tntp.read_flow_file(root / "SiouxFalls_flow.tntp", u_col="From", v_col="To"),
+    tntp.read_node_file(urljoin(root, "SiouxFalls_node.tntp"), index_col="Node", x_col="X", y_col="Y", crs="wgs84"),
+    tntp.read_net_file(urljoin(root, "SiouxFalls_net.tntp"), crs="wgs84"),
+    tntp.read_flow_file(urljoin(root, "SiouxFalls_flow.tntp"), u_col="From", v_col="To"),
 )
 
-node_list = list(network.nodes)
-demand_table = tntp.read_demand_file(root / "SiouxFalls_trips.tntp").reindex(index=node_list, columns=node_list)
+colors = ox.plot.get_edge_colors_by_attr(network, "Cost", cmap="RdYlGn_r")
+ox.plot.plot_graph(network, edge_color=colors, show=False, save=True, dpi=300, filepath="example.png")
 ```

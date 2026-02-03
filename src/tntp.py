@@ -6,6 +6,9 @@ import pandas as pd
 import pathlib
 import re
 
+from urllib.request import urlopen
+from urllib.parse import urlparse
+
 
 def read_net_file(
     path: pathlib.Path, u_col: str = "init_node", v_col: str = "term_node", k_col: str = None, crs: str = None
@@ -118,7 +121,13 @@ def read_demand_file(path: pathlib.Path, mode: str = "r", enc: str = "utf-8") ->
         Table of demands (index: origin, columns: destination).
     """
 
-    data = open(path, mode).read()
+    path = str(path)
+    if urlparse(path).scheme == "":  # its a path
+        with open(path, mode) as f:
+            data = f.read()
+    else:
+        with urlopen(path) as f:
+            data = f.read()
     if isinstance(data, bytes):
         data = data.decode(enc)
 
