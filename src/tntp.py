@@ -1,6 +1,5 @@
 # code to read files from https://github.com/bstabler/TransportationNetworks
 import geopandas as gpd
-import itertools
 import osmnx
 import pandas as pd
 import pathlib
@@ -8,6 +7,19 @@ import re
 
 from urllib.request import urlopen
 from urllib.parse import urlparse
+
+try:
+    from itertools import batched
+except ImportError:
+    from itertools import islice
+
+    def batched(iterable, n):
+        iterator = iter(iterable)
+        while True:
+            batch = tuple(islice(iterator, n))
+            if not batch:
+                return
+            yield batch
 
 
 def read_net_file(
@@ -140,7 +152,7 @@ def read_demand_file(path: pathlib.Path, mode: str = "r", enc: str = "utf-8") ->
 
     rows = []
     # after discarding the first block containing the metadata, we can iterate over pairs of origin and the demands
-    for orig, block in itertools.batched(blocks, 2):
+    for orig, block in batched(blocks, 2):
         for dest, demand in re.findall(demand_pattern, block):
             rows.append((orig, dest, demand))
 
