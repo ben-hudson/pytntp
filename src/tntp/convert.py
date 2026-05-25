@@ -69,6 +69,8 @@ def _parse_net_metadata(data: str) -> tuple[dict, int]:
 
 def read_net_file(
     path: pathlib.Path,
+    u_col: str = "init_node",
+    v_col: str = "term_node",
     crs: str = None,
     mode: str = "r",
     enc: str = "utf-8",
@@ -99,11 +101,9 @@ def read_net_file(
 
     metadata, n_metadata_lines = _parse_net_metadata(data)
 
-    df = pd.read_csv(io.StringIO(data), skiprows=n_metadata_lines, sep="\t")
-    df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
-    df.drop(["~", ";"], axis=1, inplace=True)
-
-    df["key"] = 0
+    df = pd.read_csv(io.StringIO(data), skiprows=n_metadata_lines, sep="\t", dtype={u_col: int, v_col: int})
+    df = df.rename(columns={name: name.strip() for name in df.columns})
+    df = df.drop(["~", ";"], axis=1)
     df["geometry"] = None
     gdf = gpd.GeoDataFrame(df, crs=crs)
     gdf.attrs = metadata
@@ -133,16 +133,14 @@ def read_node_file(
         built from ``x_col`` / ``y_col``.
     """
 
-    df = pd.read_csv(path, sep="\t", index_col=index_col)
+    df = pd.read_csv(path, sep="\t", index_col=index_col, dtype={index_col: int, x_col: float, y_col: float})
     df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
     df.drop([";"], axis=1, inplace=True)
 
     return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x_col], df[y_col], crs=crs))
 
 
-def read_flow_file(
-    path: pathlib.Path, u_col: str = "init_node", v_col: str = "term_node", k_col: str = None
-) -> pd.DataFrame:
+def read_flow_file(path: pathlib.Path, u_col: str = "init_node", v_col: str = "term_node") -> pd.DataFrame:
     """Read a flow file and return a flat DataFrame of per-edge flow attributes.
 
     Parameters
@@ -150,27 +148,18 @@ def read_flow_file(
     path:
         Path or URL to the input file (anything ``pandas.read_csv`` accepts).
     u_col, v_col:
-        Currently unused. Kept for symmetry with ``read_net_file`` so callers
-        can pre-declare endpoint column names.
-    k_col:
-        Name of an existing key column to keep. If ``None``, a new ``key``
-        column of zeros is added so the resulting frame can be merged
-        against ``read_net_file`` output on ``(init_node, term_node, key)``.
+        Names of the endpoint columns; cast to ``int`` on read so the frame
+        can be merged against ``read_net_file`` output on ``(u_col, v_col)``.
 
     Returns
     -------
     pd.DataFrame
         Flat DataFrame with one row per edge and one column per flow attribute
-        from the file (plus the synthesized ``key`` column if ``k_col`` was
-        ``None``). No index is set.
+        from the file. No index is set.
     """
 
-    df = pd.read_csv(path, sep="\t")
-    df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
-
-    if k_col is None:
-        k_col = "key"
-        df[k_col] = 0
+    df = pd.read_csv(path, sep="\t", dtype={u_col: int, v_col: int})
+    df = df.rename(columns={name: name.strip() for name in df.columns})
     return df
 
 
@@ -207,73 +196,61 @@ def read_demand_file(path: pathlib.Path, mode: str = "r", enc: str = "utf-8") ->
         for dest, demand in re.findall(demand_pattern, block):
             rows.append((orig, dest, demand))
 
-    df = pd.DataFrame(rows, columns=["orig", "dest", "demand"])
-    df["orig"] = df["orig"].astype(int)
-    df["dest"] = df["dest"].astype(int)
-    df["demand"] = df["demand"].astype(float)
+    dtypes = {"orig": int, "dest": int, "demand": float}
+    df = pd.DataFrame(rows, columns=dtypes.keys(), dtype=dtypes)
     return df.pivot(index="orig", columns="dest", values="demand")
 
 
 def convert_to_networkx(
+    node_df: gpd.GeoDataFrame,
     net_df: gpd.GeoDataFrame,
-    node_df: gpd.GeoDataFrame = None,
     flow_df: pd.DataFrame = None,
     u_col: str = "init_node",
     v_col: str = "term_node",
-    k_col: str = "key",
 ) -> nx.MultiDiGraph:
-    """Convert edge (and optional node) GeoDataFrames to a NetworkX graph.
+    """Convert edge and node GeoDataFrames to a NetworkX graph.
 
     Routes through ``osmnx.convert.graph_from_gdfs`` so the returned graph is
     osmnx-compatible: it carries ``net_df.crs`` on ``G.graph["crs"]``, every
-    node has ``x`` / ``y`` attributes, and edges are keyed by ``(u, v, key)``.
+    node has ``x`` / ``y`` attributes, and edges are keyed by ``(u, v, 0)``
+    (TNTP networks have no parallel edges, so ``key`` is always ``0``).
 
     Columns in ``net_df`` and ``flow_df`` become edge attributes (merged on
-    ``(u_col, v_col, k_col)``). If ``node_df`` is provided its columns
-    (including ``geometry``-derived ``x`` / ``y``) become node attributes;
-    otherwise a NaN-coord node table is synthesized from the unique edge
-    endpoints so the graph still round-trips through ``graph_to_gdfs``.
+    ``(u_col, v_col)``). ``node_df`` columns (including ``geometry``-derived
+    ``x`` / ``y``) become node attributes.
 
     Parameters
     ----------
+    node_df:
+        GeoDataFrame of nodes from ``read_node_file``. If its CRS differs from
+        ``net_df.crs`` it is reprojected to match.
     net_df:
         GeoDataFrame of edges from ``read_net_file``.
-    node_df:
-        Optional GeoDataFrame of nodes from ``read_node_file``. If its CRS
-        differs from ``net_df.crs`` it is reprojected to match.
     flow_df:
         Optional DataFrame from ``read_flow_file``. Must share
-        ``u_col``/``v_col``/``k_col`` column names with ``net_df``.
-    u_col, v_col, k_col:
-        Column names in ``net_df`` (and ``flow_df``) holding the from/to/key
-        ids for each edge.
+        ``u_col``/``v_col`` column names with ``net_df``.
+    u_col, v_col:
+        Column names in ``net_df`` (and ``flow_df``) holding the from/to ids
+        for each edge.
 
     Returns
     -------
     networkx.MultiDiGraph
-        Graph whose nodes are the union of ``node_df.index`` (if given) and
-        every endpoint of ``net_df``, and whose edges are ``net_df`` (merged
-        with ``flow_df`` if supplied).
+        Graph whose nodes come from ``node_df`` and whose edges are ``net_df``
+        (merged with ``flow_df`` if supplied).
     """
 
     if flow_df is not None:
-        net_df = pd.merge(net_df, flow_df, on=[u_col, v_col, k_col])
+        net_df = pd.merge(net_df, flow_df, on=[u_col, v_col])
 
-    endpoints = pd.unique(np.concatenate([net_df[u_col].values, net_df[v_col].values]))
+    target_crs = getattr(net_df, "crs", None)
+    if target_crs is not None:
+        node_df = node_df.to_crs(target_crs)
+    node_df["x"] = node_df.geometry.x
+    node_df["y"] = node_df.geometry.y
 
-    # graph_from_gdfs requires x/y columns on the node table; when the user has
-    # no node file, synthesize a NaN-coord table so the graph still round-trips.
-    if node_df is None:
-        node_df = pd.DataFrame({"x": np.nan, "y": np.nan}, index=pd.Index(endpoints))
-    else:
-        target_crs = getattr(net_df, "crs", None)
-        if target_crs is not None:
-            node_df = node_df.to_crs(target_crs)
-        node_df["x"] = node_df.geometry.x
-        node_df["y"] = node_df.geometry.y
-        node_df = node_df.reindex(node_df.index.union(endpoints))
-
-    return osmnx.convert.graph_from_gdfs(node_df, net_df.set_index([u_col, v_col, k_col]))
+    net_df = net_df.assign(key=0)
+    return osmnx.convert.graph_from_gdfs(node_df, net_df.set_index([u_col, v_col, "key"]))
 
 
 def split_non_through_nodes(

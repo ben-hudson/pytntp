@@ -10,8 +10,8 @@ flow_df = tntp.read_flow_file(urljoin(root, f"{name}_flow.tntp")).rename(
     columns={"From": "init_node", "To": "term_node"}
 )
 network = tntp.convert_to_networkx(
-    tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:26771"),
     tntp.read_node_file(urljoin(root, f"{name}_node.tntp"), index_col="node", x_col="X", y_col="Y", crs="EPSG:26771"),
+    tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:26771"),
     flow_df=flow_df,
 )
 
@@ -38,7 +38,7 @@ ax_vc.set_title("Link congestion", color="white")
 ox.plot.plot_graph(
     roads,
     ax=ax_flow,
-    edge_color=tntp.quantile_edge_colors(roads, "Volume", "viridis"),
+    edge_color=tntp.quantile_edge_colors(roads, "Volume", "magma"),
     show=False,
 )
 ax_flow.set_title("Traffic flow", color="white")
