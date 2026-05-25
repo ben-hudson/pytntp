@@ -9,11 +9,13 @@ root = f"https://raw.githubusercontent.com/bstabler/TransportationNetworks/refs/
 flow_df = tntp.read_flow_file(urljoin(root, f"{name}_flow.tntp")).rename(
     columns={"From": "init_node", "To": "term_node"}
 )
-network = tntp.convert_to_networkx(
-    tntp.read_node_file(urljoin(root, f"{name}_node.tntp"), index_col="node", x_col="X", y_col="Y", crs="EPSG:26771"),
-    tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:26771"),
-    flow_df=flow_df,
+node_df = tntp.read_node_file(
+    urljoin(root, f"{name}_node.tntp"), index_col="node", x_col="X", y_col="Y", crs="EPSG:26771"
 )
+net_df = tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:26771").merge(
+    flow_df, on=["init_node", "term_node"]
+)
+network = tntp.convert_to_networkx(node_df, net_df)
 
 for u, v, k, data in network.edges(keys=True, data=True):
     data["vc_ratio"] = data["Volume"] / data["capacity"]

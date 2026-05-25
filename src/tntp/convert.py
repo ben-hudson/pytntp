@@ -101,7 +101,9 @@ def read_net_file(
 
     metadata, n_metadata_lines = _parse_net_metadata(data)
 
-    df = pd.read_csv(io.StringIO(data), skiprows=n_metadata_lines, sep="\t", dtype={u_col: int, v_col: int})
+    # TNTP net files pad two blank/whitespace-only lines between
+    # <END OF METADATA> and the ``~``-prefixed column-header row.
+    df = pd.read_csv(io.StringIO(data), skiprows=n_metadata_lines + 2, sep="\t", dtype={u_col: int, v_col: int})
     df = df.rename(columns={name: name.strip() for name in df.columns})
     df = df.drop(["~", ";"], axis=1)
     df["geometry"] = None
@@ -133,9 +135,14 @@ def read_node_file(
         built from ``x_col`` / ``y_col``.
     """
 
-    df = pd.read_csv(path, sep="\t", index_col=index_col, dtype={index_col: int, x_col: float, y_col: float})
+    df = pd.read_csv(
+        path,
+        sep="\t",
+        index_col=index_col,
+        usecols=[index_col, x_col, y_col],
+        dtype={index_col: int, x_col: float, y_col: float},
+    )
     df.rename(columns={name: name.strip() for name in df.columns}, inplace=True)
-    df.drop([";"], axis=1, inplace=True)
 
     return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x_col], df[y_col], crs=crs))
 
@@ -197,14 +204,13 @@ def read_demand_file(path: pathlib.Path, mode: str = "r", enc: str = "utf-8") ->
             rows.append((orig, dest, demand))
 
     dtypes = {"orig": int, "dest": int, "demand": float}
-    df = pd.DataFrame(rows, columns=dtypes.keys(), dtype=dtypes)
+    df = pd.DataFrame(rows, columns=dtypes.keys()).astype(dtypes)
     return df.pivot(index="orig", columns="dest", values="demand")
 
 
 def convert_to_networkx(
     node_df: gpd.GeoDataFrame,
     net_df: gpd.GeoDataFrame,
-    flow_df: pd.DataFrame = None,
     u_col: str = "init_node",
     v_col: str = "term_node",
 ) -> nx.MultiDiGraph:
@@ -215,9 +221,10 @@ def convert_to_networkx(
     node has ``x`` / ``y`` attributes, and edges are keyed by ``(u, v, 0)``
     (TNTP networks have no parallel edges, so ``key`` is always ``0``).
 
-    Columns in ``net_df`` and ``flow_df`` become edge attributes (merged on
-    ``(u_col, v_col)``). ``node_df`` columns (including ``geometry``-derived
-    ``x`` / ``y``) become node attributes.
+    Columns in ``net_df`` become edge attributes; ``node_df`` columns
+    (including ``geometry``-derived ``x`` / ``y``) become node attributes.
+    If you have a flow DataFrame, merge it into ``net_df`` (e.g.
+    ``net_df.merge(flow_df, on=[u_col, v_col])``) before calling.
 
     Parameters
     ----------
@@ -225,23 +232,16 @@ def convert_to_networkx(
         GeoDataFrame of nodes from ``read_node_file``. If its CRS differs from
         ``net_df.crs`` it is reprojected to match.
     net_df:
-        GeoDataFrame of edges from ``read_net_file``.
-    flow_df:
-        Optional DataFrame from ``read_flow_file``. Must share
-        ``u_col``/``v_col`` column names with ``net_df``.
+        GeoDataFrame of edges from ``read_net_file``, optionally pre-merged
+        with a flow DataFrame.
     u_col, v_col:
-        Column names in ``net_df`` (and ``flow_df``) holding the from/to ids
-        for each edge.
+        Column names in ``net_df`` holding the from/to ids for each edge.
 
     Returns
     -------
     networkx.MultiDiGraph
-        Graph whose nodes come from ``node_df`` and whose edges are ``net_df``
-        (merged with ``flow_df`` if supplied).
+        Graph whose nodes come from ``node_df`` and whose edges are ``net_df``.
     """
-
-    if flow_df is not None:
-        net_df = pd.merge(net_df, flow_df, on=[u_col, v_col])
 
     target_crs = getattr(net_df, "crs", None)
     if target_crs is not None:
@@ -253,69 +253,68 @@ def convert_to_networkx(
     return osmnx.convert.graph_from_gdfs(node_df, net_df.set_index([u_col, v_col, "key"]))
 
 
-def split_non_through_nodes(
+def split_zone_nodes(
+    node_df: gpd.GeoDataFrame,
     net_df: gpd.GeoDataFrame,
     demand_df: pd.DataFrame,
-    node_df: gpd.GeoDataFrame = None,
     u_col: str = "init_node",
     v_col: str = "term_node",
-) -> tuple[gpd.GeoDataFrame, pd.DataFrame, gpd.GeoDataFrame | None]:
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, pd.DataFrame]:
     """Duplicate every node ``n < first_thru_node`` into source/sink copies.
 
     TNTP networks declare a ``<FIRST THRU NODE>`` value: nodes with id less
     than this value (centroids) may originate or terminate trips but cannot
     be routed *through*. This function enforces that constraint structurally
-    by splitting each non-through node ``n`` into two ids:
+    by splitting each centroid ``n`` into two fresh integer ids allocated
+    above ``max(node_df.index)``:
 
-    - ``(n, "source")`` carries ``n``'s outgoing edges and demand row.
-    - ``(n, "sink")`` carries ``n``'s incoming edges and demand column.
+    - ``source_id[n]`` carries ``n``'s outgoing edges and demand row.
+    - ``sink_id[n]`` carries ``n``'s incoming edges and demand column.
 
     Because the source has no incoming edges and the sink has no outgoing
-    edges, no path can traverse the centroid. New ``(n, "sink")`` demand
-    rows and ``(n, "source")`` demand columns are zero-filled. The pre-rename
-    endpoint ids are preserved in ``{u_col}_orig`` / ``{v_col}_orig`` columns.
+    edges, no path can traverse the centroid. Original centroid ids are
+    removed from every output; ``node_df`` is the source of truth for the
+    id space. The returned ``node_df`` carries a ``parent_node`` column:
+    the original id for non-centroid rows, and the centroid id for both
+    source and sink copies of a split centroid.
 
     Parameters
     ----------
+    node_df:
+        Node GeoDataFrame from ``read_node_file``. Used as the source of
+        truth for both the centroid set (``index < first_thru_node``) and
+        the id ceiling above which new ids are allocated.
     net_df:
         Edge GeoDataFrame from ``read_net_file``.
     demand_df:
         OD demand from ``read_demand_file``, indexed origin x destination.
-    node_df:
-        Optional node GeoDataFrame from ``read_node_file``. If given, each
-        centroid row is duplicated into ``(n, "source")`` and ``(n, "sink")``
-        copies sharing the original coordinates, so plotting still works.
     u_col, v_col:
         Column names in ``net_df`` holding the from/to ids for each edge.
 
     Returns
     -------
-    tuple[gpd.GeoDataFrame, pd.DataFrame, gpd.GeoDataFrame | None]
-        The split edge, demand, and node tables. The node table is ``None``
-        when no ``node_df`` was provided.
+    tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, pd.DataFrame]
+        The split node, edge, and demand tables.
     """
 
-    first_thru_node = int(net_df.attrs.get("FIRST THRU NODE", "1"))
+    first_thru_node = int(net_df.attrs.get("FIRST THRU NODE", 1))
+    zones = [n for n in node_df.index if n < first_thru_node]
 
-    net_df = net_df.join(net_df[[u_col, v_col]].add_suffix("_orig"))
-    net_df[u_col] = net_df[u_col].map(lambda n: (n, "source") if n < first_thru_node else n)
-    net_df[v_col] = net_df[v_col].map(lambda n: (n, "sink") if n < first_thru_node else n)
+    start = int(node_df.index.max()) + 1
+    n_zones = len(zones)
+    source_nodes = dict(zip(zones, range(start, start + n_zones)))
+    sink_nodes = dict(zip(zones, range(start + n_zones, start + 2 * n_zones)))
 
-    centroids = [n for n in demand_df.index if n < first_thru_node]
-    demand_df = demand_df.rename(
-        index={n: (n, "source") for n in centroids},
-        columns={n: (n, "sink") for n in centroids},
-    )
-    new_index = pd.Index(list(demand_df.index) + [(n, "sink") for n in centroids], dtype=object)
-    new_cols = pd.Index(list(demand_df.columns) + [(n, "source") for n in centroids], dtype=object)
-    demand_df = demand_df.reindex(index=new_index, columns=new_cols, fill_value=0.0)
+    # remap to source/sink nodes but default to original node if it doesn't exist in source/sink mapping
+    net_df[u_col] = net_df[u_col].map(lambda n: source_nodes.get(n, n))
+    net_df[v_col] = net_df[v_col].map(lambda n: sink_nodes.get(n, n))
 
-    split_node_df = None
-    if node_df is not None:
-        centroid_rows = node_df.loc[node_df.index.isin(centroids)]
-        sources = centroid_rows.rename(index={n: (n, "source") for n in centroid_rows.index})
-        sinks = centroid_rows.rename(index={n: (n, "sink") for n in centroid_rows.index})
-        non_centroids = node_df.loc[~node_df.index.isin(centroids)]
-        split_node_df = pd.concat([non_centroids, sources, sinks])
+    demand_df = demand_df.rename(index=source_nodes, columns=sink_nodes)
 
-    return net_df, demand_df, split_node_df
+    node_df["parent_node"] = node_df.index
+    zone_rows = node_df.loc[zones]
+    sources = zone_rows.rename(index=source_nodes)
+    sinks = zone_rows.rename(index=sink_nodes)
+    node_df = pd.concat([node_df.drop(zones), sources, sinks])
+
+    return node_df, net_df, demand_df
