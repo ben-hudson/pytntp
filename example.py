@@ -20,8 +20,6 @@ network = tntp.convert_to_networkx(node_df, net_df)
 for u, v, k, data in network.edges(keys=True, data=True):
     data["vc_ratio"] = data["Volume"] / data["capacity"]
 
-tntp.offset_parallel_edges(network)
-
 # Plot only the road links — drop link_type==3 (centroid connectors) so they
 # don't clutter the map or compress the quantile colormap.
 road_edges = [(u, v, k) for u, v, k, d in network.edges(keys=True, data=True) if d.get("link_type") != 3]
