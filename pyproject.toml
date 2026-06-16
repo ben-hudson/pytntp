@@ -4,17 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tntp"
-version = "0.0.0"  # Placeholder, will be overridden by setuptools-scm (hopefully)
+dynamic = ["version"]  # populated by setuptools-scm from git tags
+description = "Tiny library to read .tntp (Transportation Network Test Problem) files and convert into NetworkX graphs."
+readme = "README.md"
 authors = [
     {name = "Ben Hudson", email = "benhudson@fastmail.com"}
 ]
-license = {file = "LICENSE"}
+license = {file = "LICENSE.txt"}
 dependencies = [
     "geopandas",
     "networkx",
     "osmnx",
     "pandas",
 ]
+
+[project.optional-dependencies]
+docs = [
+    "mkdocs-material",
+    "mkdocstrings[python]",
+]
+
+[project.urls]
+Homepage = "https://ben-hudson.github.io/pytntp/"
+Repository = "https://github.com/ben-hudson/pytntp"
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
