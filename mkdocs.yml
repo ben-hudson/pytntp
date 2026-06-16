@@ -1,0 +1,47 @@
+site_name: tntp
+site_description: Read .tntp (Transportation Network Test Problem) files and convert them into NetworkX graphs.
+site_url: https://ben-hudson.github.io/pytntp/
+repo_url: https://github.com/ben-hudson/pytntp
+repo_name: ben-hudson/pytntp
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Zone splitting: zone-splitting.md
+  - API reference:
+      - reference/index.md
+      - tntp.read: reference/read.md
+      - tntp.convert: reference/convert.md
+      - tntp.transform: reference/transform.md
+      - tntp.vis: reference/vis.md

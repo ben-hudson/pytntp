@@ -1,0 +1,3 @@
+# `tntp.read`
+
+::: tntp.read
