@@ -1,8 +1,9 @@
 # Getting started
 
-This walkthrough mirrors [`example.py`](https://github.com/ben-hudson/pytntp/blob/main/example.py),
-which loads the SiouxFalls network, computes a congestion metric, and renders a
-two-panel map.
+This walkthrough follows the same workflow as
+[`example.py`](https://github.com/ben-hudson/pytntp/blob/main/example.py):
+load a network, compute a congestion metric, and render a two-panel map. Here we use
+the ChicagoSketch network.
 
 ## 1. Read the network files
 
@@ -13,16 +14,17 @@ A TNTP network is split across separate files. `tntp` reads each into a
 import tntp
 from urllib.parse import urljoin
 
-name = "SiouxFalls"
-root = "https://raw.githubusercontent.com/bstabler/TransportationNetworks/refs/heads/master/SiouxFalls/"
+name = "ChicagoSketch"
+# Note: the file prefix is "ChicagoSketch" but the directory is "Chicago-Sketch".
+root = "https://raw.githubusercontent.com/bstabler/TransportationNetworks/refs/heads/master/Chicago-Sketch/"
 
 flow_df = tntp.read_flow_file(urljoin(root, f"{name}_flow.tntp")).rename(
     columns={"From": "init_node", "To": "term_node"}
 )
 node_df = tntp.read_node_file(
-    urljoin(root, f"{name}_node.tntp"), index_col="Node", x_col="X", y_col="Y", crs="EPSG:4326"
+    urljoin(root, f"{name}_node.tntp"), index_col="node", x_col="X", y_col="Y", crs="EPSG:26771"
 )
-net_df = tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:4326").merge(
+net_df = tntp.read_net_file(urljoin(root, f"{name}_net.tntp"), crs="EPSG:26771").merge(
     flow_df, on=["init_node", "term_node"]
 )
 ```
@@ -63,6 +65,6 @@ ox.plot.plot_graph(roads, ax=ax_vc, edge_color=tntp.quantile_edge_colors(roads, 
 ox.plot.plot_graph(roads, ax=ax_flow, edge_color=tntp.quantile_edge_colors(roads, "Volume", "magma"), show=False)
 ```
 
-![SiouxFalls link congestion (left) and traffic flow (right)](assets/siouxfalls-congestion-flow.png)
+![ChicagoSketch link congestion (left) and traffic flow (right)](assets/chicagosketch-congestion-flow.png)
 
 [geopandas]: https://geopandas.org/
